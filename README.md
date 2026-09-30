@@ -40,7 +40,7 @@ Payload: `apps/desktop/.desktop-build/targets/linux-x64/artifacts/linux-unpacked
 git clone https://github.com/mtongle/dsh-desktop-linux
 cd dsh-desktop-linux
 
-./scripts/bootstrap.sh                  # clone upstream @639ed015, apply patch, vendor, .env.linux
+./scripts/bootstrap.sh                  # shallow-clone upstream @ dsh-v0.2.0-rc.2, apply patch, vendor, .env.linux
 ./scripts/build.sh                      # pnpm install + build + package:desktop:dir  (~15 min cold)
 
 DSH_DESKTOP_PAYLOAD=~/build/deepseek-harness/apps/desktop/.desktop-build/targets/linux-x64/artifacts/linux-unpacked \

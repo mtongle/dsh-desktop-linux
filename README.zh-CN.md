@@ -37,7 +37,7 @@ Linux is not a supported Desktop release target
 git clone https://github.com/mtongle/dsh-desktop-linux
 cd dsh-desktop-linux
 
-./scripts/bootstrap.sh                  # 克隆上游 @639ed015、打补丁、vendor、写 .env.linux
+./scripts/bootstrap.sh                  # 浅克隆上游 @ dsh-v0.2.0-rc.2、打补丁、vendor、写 .env.linux
 ./scripts/build.sh                      # pnpm install + build + package:desktop:dir（冷构建约 15 分钟）
 
 DSH_DESKTOP_PAYLOAD=~/build/deepseek-harness/apps/desktop/.desktop-build/targets/linux-x64/artifacts/linux-unpacked \
