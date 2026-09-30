@@ -1,0 +1,48 @@
+#!/bin/sh
+# DeepSeek Harness Desktop — Arch Linux local build of the official Electron shell.
+# The unpacked application lives in $DSH_DESKTOP_APP_DIR
+# (default ~/.local/opt/deepseek-harness-desktop).
+set -u
+
+APP_DIR="${DSH_DESKTOP_APP_DIR:-$HOME/.local/opt/deepseek-harness-desktop}"
+BIN="$APP_DIR/deepseek-harness"
+
+if [ ! -x "$BIN" ]; then
+  echo "DeepSeek Harness Desktop: $BIN is missing or not executable." >&2
+  exit 1
+fi
+
+# The harness keeps all user data under ~/.dsh (shared with the dsh CLI).
+: "${DSH_HOME:=$HOME/.dsh}"
+export DSH_HOME
+
+# Electron picks XWayland by default; keep that unless the caller overrides it.
+: "${ELECTRON_OZONE_PLATFORM_HINT:=auto}"
+export ELECTRON_OZONE_PLATFORM_HINT
+
+# Escape hatch: always start with software rendering.
+if [ "${DSH_DESKTOP_FORCE_DISABLE_GPU:-0}" = "1" ]; then
+  exec "$BIN" --disable-gpu "$@"
+fi
+
+# GPU bring-up under niri/XWayland is racy. Electron sometimes aborts with
+#   GPU process launch failed: error_code=1002
+#   FATAL:...gpu_data_manager_impl_private.cc] GPU process isn't usable. Goodbye.
+# Take the normal path first and fall back to software rendering ONLY when that
+# exact signature shows up, so a normal quit (or any unrelated failure) is
+# never retried or masked.
+LOG="$(mktemp "${TMPDIR:-/tmp}/dsh-desktop.XXXXXX.log")"
+
+"$BIN" "$@" >"$LOG" 2>&1
+STATUS=$?
+
+cat "$LOG" >&2
+
+if [ "$STATUS" -ne 0 ] && grep -qE "GPU process isn't usable|GPU process launch failed|error_code=1002" "$LOG"; then
+  echo "DeepSeek Harness Desktop: GPU bring-up failed (exit $STATUS); retrying with --disable-gpu." >&2
+  rm -f "$LOG"
+  exec "$BIN" --disable-gpu "$@"
+fi
+
+rm -f "$LOG"
+exit "$STATUS"

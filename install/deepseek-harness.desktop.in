@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=DeepSeek Harness
+Comment=Open-source agent harness from DeepSeek (Arch Linux local build)
+Exec=@LAUNCHER@ %u
+Icon=deepseek-harness
+Terminal=false
+Categories=Development;Utility;
+Keywords=deepseek;harness;dsh;agent;ai;
+StartupWMClass=deepseek-harness
+MimeType=x-scheme-handler/dsh;

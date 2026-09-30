@@ -1,0 +1,458 @@
+diff --git a/apps/desktop/scripts/desktop-auto-update-environment.d.mts b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
+index 00ebf8c..38d4317 100644
+--- a/apps/desktop/scripts/desktop-auto-update-environment.d.mts
++++ b/apps/desktop/scripts/desktop-auto-update-environment.d.mts
+@@ -5,7 +5,7 @@ export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
+ export type DesktopAutoUpdateEnvironment = 'test' | 'production'
+ 
+ /** Directory name of one supported Desktop release target. */
+-export type DesktopAutoUpdateTarget = 'mac-arm64' | 'mac-x64' | 'win-x64'
++export type DesktopAutoUpdateTarget = 'mac-arm64' | 'mac-x64' | 'win-x64' | 'linux-x64'
+ 
+ /** Public updater URL and object prefixes for one release target. */
+ export interface DesktopAutoUpdateConfig {
+diff --git a/apps/desktop/scripts/desktop-auto-update-environment.mjs b/apps/desktop/scripts/desktop-auto-update-environment.mjs
+index 464d079..8d31019 100644
+--- a/apps/desktop/scripts/desktop-auto-update-environment.mjs
++++ b/apps/desktop/scripts/desktop-auto-update-environment.mjs
+@@ -22,7 +22,7 @@ const UPDATE_ENVIRONMENTS = {
+   },
+ }
+ 
+-const UPDATE_TARGETS = new Set(['mac-arm64', 'mac-x64', 'win-x64'])
++const UPDATE_TARGETS = new Set(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64'])
+ 
+ /**
+  * Resolve the update deployment, defaulting local release work to test.
+diff --git a/apps/desktop/scripts/desktop-build-paths.d.mts b/apps/desktop/scripts/desktop-build-paths.d.mts
+index 9a8e408..d366e9e 100644
+--- a/apps/desktop/scripts/desktop-build-paths.d.mts
++++ b/apps/desktop/scripts/desktop-build-paths.d.mts
+@@ -43,7 +43,7 @@ export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget): Deskto
+  * @returns Platform and architecture of the prepared payload.
+  */
+ export function desktopTargetPlatform(target: DesktopAutoUpdateTarget): {
+-  readonly platform: 'darwin' | 'win32'
++  readonly platform: 'darwin' | 'win32' | 'linux'
+   readonly arch: 'arm64' | 'x64'
+ }
+ 
+diff --git a/apps/desktop/scripts/desktop-build-paths.mjs b/apps/desktop/scripts/desktop-build-paths.mjs
+index 4f33e80..c3cb5b1 100644
+--- a/apps/desktop/scripts/desktop-build-paths.mjs
++++ b/apps/desktop/scripts/desktop-build-paths.mjs
+@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
+ 
+ const APP_ROOT = resolve(import.meta.dirname, '..')
+ const BUILD_ROOT = join(APP_ROOT, '.desktop-build')
+-const SUPPORTED_TARGETS = new Set(['mac-arm64', 'mac-x64', 'win-x64'])
++const SUPPORTED_TARGETS = new Set(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64'])
+ 
+ /**
+  * Resolve the fixed build target selected by a packaging environment.
+@@ -64,12 +64,12 @@ export function desktopTargetBuildPaths(target) {
+  * Return the platform and architecture of the payload one release target prepares.
+  * Windows is prepared as x64 only, so this differs from the build host on an arm64 Windows machine.
+  * @param {'mac-arm64' | 'mac-x64' | 'win-x64'} target - Supported Desktop target name.
+- * @returns {{ platform: 'darwin' | 'win32', arch: 'arm64' | 'x64' }} Platform and architecture of the prepared payload.
++ * @returns {{ platform: 'darwin' | 'win32' | 'linux', arch: 'arm64' | 'x64' }} Platform and architecture of the prepared payload.
+  */
+ export function desktopTargetPlatform(target) {
+   assertSupportedTarget(target)
+   return {
+-    platform: /** @type {'darwin' | 'win32'} */ (target === 'win-x64' ? 'win32' : 'darwin'),
++    platform: /** @type {'darwin' | 'win32' | 'linux'} */ (target === 'win-x64' ? 'win32' : target === 'linux-x64' ? 'linux' : 'darwin'),
+     arch: /** @type {'arm64' | 'x64'} */ (target === 'mac-arm64' ? 'arm64' : 'x64'),
+   }
+ }
+diff --git a/apps/desktop/scripts/desktop-package-environment.d.mts b/apps/desktop/scripts/desktop-package-environment.d.mts
+index b0d7bc2..c158004 100644
+--- a/apps/desktop/scripts/desktop-package-environment.d.mts
++++ b/apps/desktop/scripts/desktop-package-environment.d.mts
+@@ -8,7 +8,7 @@
+  * @returns Isolated environment with file-owned release settings.
+  */
+ export function loadDesktopPackageEnvironment(
+-  platform: 'win32' | 'darwin',
++  platform: 'win32' | 'darwin' | 'linux',
+   environment?: NodeJS.ProcessEnv,
+   appRoot?: string,
+ ): NodeJS.ProcessEnv
+@@ -22,6 +22,6 @@ export function loadDesktopPackageEnvironment(
+  */
+ export function validateDesktopPackageEnvironment(
+   environment: NodeJS.ProcessEnv,
+-  target: { platform: 'win32' | 'darwin', arch: string },
++  target: { platform: 'win32' | 'darwin' | 'linux', arch: string },
+   options?: { unsigned?: boolean, prepareOnly?: boolean },
+ ): void
+diff --git a/apps/desktop/scripts/desktop-package-environment.mjs b/apps/desktop/scripts/desktop-package-environment.mjs
+index 3addf3f..64596e4 100644
+--- a/apps/desktop/scripts/desktop-package-environment.mjs
++++ b/apps/desktop/scripts/desktop-package-environment.mjs
+@@ -18,6 +18,8 @@ const WINDOWS_SETTING = /^DSH_DESKTOP_WINDOWS_(?:CER_FILE|SIGNTOOL|KEY_CONTAINER
+ const MACOS_SETTING = /^(?:DSH_DESKTOP_MACOS_(?:SIGNING_IDENTITY|TEAM_ID|PACK_CONCURRENCY|DOWNLOAD_PROXY|NOTARIZATION_PROXY)|APPLE_(?:API_KEY|API_KEY_ID|API_ISSUER|ID|APP_SPECIFIC_PASSWORD|TEAM_ID|KEYCHAIN|KEYCHAIN_PROFILE)|CSC_(?:LINK|KEY_PASSWORD))$/u
+ const AMBIENT_RELEASE_SETTING = /^(?:DSH_DESKTOP_(?:APP_ID|AUTO_UPDATE_ENV|MANDATORY_UPDATE_.*|WINDOWS_.*|MACOS_.*)|APPLE_.*|(?:WIN_)?CSC_.*|DOWNLOAD_(?:TEST|PROD)_.*)$/iu
+ const FILE_SETTINGS = ['DSH_DESKTOP_WINDOWS_CER_FILE', 'DSH_DESKTOP_WINDOWS_SIGNTOOL', 'APPLE_API_KEY', 'APPLE_KEYCHAIN', 'CSC_LINK']
++// Linux has no platform-specific release settings beyond the shared ones, so nothing else is accepted there.
++const NO_PLATFORM_SETTING = /^(?!)/u
+ 
+ /**
+  * Read the target's required UTF-8 dotenv file; release settings never fall back to ambient values.
+@@ -27,7 +29,7 @@ const FILE_SETTINGS = ['DSH_DESKTOP_WINDOWS_CER_FILE', 'DSH_DESKTOP_WINDOWS_SIGN
+  * @returns {NodeJS.ProcessEnv} Isolated environment with file-owned release settings.
+  */
+ export function loadDesktopPackageEnvironment(platform, environment = process.env, appRoot = APP_ROOT) {
+-  const path = join(appRoot, platform === 'win32' ? '.env.windows' : '.env.macos')
++  const path = join(appRoot, platform === 'win32' ? '.env.windows' : platform === 'linux' ? '.env.linux' : '.env.macos')
+   let contents
+   try {
+     contents = readFileSync(path, 'utf8')
+@@ -43,7 +45,7 @@ export function loadDesktopPackageEnvironment(platform, environment = process.en
+     // Parser diagnostics can contain credential-bearing input.
+     throw new Error(`desktop package: invalid dotenv syntax in ${path}`)
+   }
+-  const platformSetting = platform === 'win32' ? WINDOWS_SETTING : MACOS_SETTING
++  const platformSetting = platform === 'win32' ? WINDOWS_SETTING : platform === 'darwin' ? MACOS_SETTING : NO_PLATFORM_SETTING
+   for (const name of Object.keys(settings)) {
+     if (!SHARED_SETTING.test(name) && !platformSetting.test(name)) {
+       throw new Error(`desktop package: unsupported setting ${name} in ${path}; use the platform template`)
+@@ -79,9 +81,12 @@ function requireReadableFile(environment, name) {
+ export function validateDesktopPackageEnvironment(environment, target, options = {}) {
+   resolveDesktopAppId(environment)
+   resolveNpmRegistry(environment)
+-  resolveDesktopPolicyEnvironment(environment)
++  // Linux is not a supported upstream release target and carries no mandatory-update policy
++  // (electron-builder-config.mjs sets `policy = undefined` for it), so there is no policy
++  // origin to resolve or validate here.
++  if (target.platform !== 'linux') resolveDesktopPolicyEnvironment(environment)
+   if (target.platform === 'darwin') resolveMacOSPackageSettings(environment)
+-  else resolveWindowsPackageSettings(environment)
++  else if (target.platform === 'win32') resolveWindowsPackageSettings(environment)
+   if (options.unsigned) return
+   if (!options.prepareOnly) resolveDesktopAutoUpdateConfig(environment, target.platform, target.arch)
+   if (target.platform === 'win32') {
+@@ -92,7 +97,7 @@ export function validateDesktopPackageEnvironment(environment, target, options =
+       keyContainer: environment.DSH_DESKTOP_WINDOWS_KEY_CONTAINER,
+     })
+     if (!options.prepareOnly) resolveWindowsSignatureCacheDirectory(environment)
+-  } else {
++  } else if (target.platform === 'darwin') {
+     resolveMacOSSigningEnvironment(environment)
+     const strategies = [
+       ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'],
+diff --git a/apps/desktop/scripts/desktop-toolchain-preflight.ts b/apps/desktop/scripts/desktop-toolchain-preflight.ts
+index ff855cf..08c8dc1 100644
+--- a/apps/desktop/scripts/desktop-toolchain-preflight.ts
++++ b/apps/desktop/scripts/desktop-toolchain-preflight.ts
+@@ -75,7 +75,7 @@ async function probeWindowsInstallerToolchain(environment: NodeJS.ProcessEnv): P
+  * @returns Every probe that failed, empty when the host can run the packaging sequence.
+  */
+ export async function probeDesktopToolchain(
+-  platform: 'darwin' | 'win32',
++  platform: 'darwin' | 'win32' | 'linux',
+   environment: NodeJS.ProcessEnv = process.env,
+ ): Promise<readonly DesktopToolchainProbeFailure[]> {
+   const failures: DesktopToolchainProbeFailure[] = []
+@@ -92,7 +92,7 @@ export async function probeDesktopToolchain(
+  * @returns Resolves when every probe passes.
+  */
+ export async function requireDesktopToolchain(
+-  platform: 'darwin' | 'win32',
++  platform: 'darwin' | 'win32' | 'linux',
+   environment: NodeJS.ProcessEnv = process.env,
+ ): Promise<void> {
+   const failures = await probeDesktopToolchain(platform, environment)
+diff --git a/apps/desktop/scripts/desktop-upload-plan.ts b/apps/desktop/scripts/desktop-upload-plan.ts
+index 439a4fa..902da7d 100644
+--- a/apps/desktop/scripts/desktop-upload-plan.ts
++++ b/apps/desktop/scripts/desktop-upload-plan.ts
+@@ -21,6 +21,9 @@ const TARGETS = {
+   'mac-arm64': { platform: 'darwin', arch: 'arm64', os: 'mac' },
+   'mac-x64': { platform: 'darwin', arch: 'x64', os: 'mac' },
+   'win-x64': { platform: 'win32', arch: 'x64', os: 'win' },
++  // Local Linux builds never reach the upload commands; the entry keeps the
++  // target record exhaustive for the shared target-name union.
++  'linux-x64': { platform: 'linux', arch: 'x64', os: 'linux' },
+ } as const satisfies Record<DesktopPackageTargetName, {
+   readonly platform: NodeJS.Platform
+   readonly arch: string
+diff --git a/apps/desktop/scripts/electron-builder-config.mjs b/apps/desktop/scripts/electron-builder-config.mjs
+index 1fb7878..59429ea 100644
+--- a/apps/desktop/scripts/electron-builder-config.mjs
++++ b/apps/desktop/scripts/electron-builder-config.mjs
+@@ -51,10 +51,12 @@ export function createElectronBuilderConfig(
+   preparedRuntimeVersion = undefined,
+ ) {
+   const appId = resolveDesktopAppId(env)
+-  const policy = resolveDesktopPolicyEnvironment(env)
+   const targetPlatform = env.DSH_DESKTOP_TARGET_PLATFORM
+   const resolvedPlatform = targetPlatform ?? hostPlatform
+   const resolvedArch = env.DSH_DESKTOP_TARGET_ARCH ?? hostArch
++  // Linux is not a supported upstream release target, so a local Linux build carries no
++  // mandatory-update policy: the policy service and its platform gate only cover macOS and Windows.
++  const policy = resolvedPlatform === 'linux' ? undefined : resolveDesktopPolicyEnvironment(env)
+   if (env.DSH_DESKTOP_UNSIGNED !== undefined && !['0', '1'].includes(env.DSH_DESKTOP_UNSIGNED)) {
+     throw new Error('desktop package: DSH_DESKTOP_UNSIGNED must be 0 or 1')
+   }
+@@ -232,6 +234,8 @@ export function createElectronBuilderConfig(
+     },
+     linux: {
+       category: 'Development',
++      icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
++      executableName: 'deepseek-harness',
+       target: ['AppImage'],
+     },
+     nsis: {
+diff --git a/apps/desktop/scripts/package-target.ts b/apps/desktop/scripts/package-target.ts
+index 62f4fcb..fe2064d 100644
+--- a/apps/desktop/scripts/package-target.ts
++++ b/apps/desktop/scripts/package-target.ts
+@@ -47,14 +47,14 @@ const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
+ const AUTOMATIC_BUILD_VERSION = 'auto'
+ 
+ /** Fixed platform and architecture identifiers exposed by package scripts. */
+-export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64'
++export type DesktopPackageTargetName = 'mac-arm64' | 'mac-x64' | 'win-x64' | 'linux-x64'
+ 
+ /** One supported release target and its electron-builder selectors. */
+ export interface DesktopPackageTarget {
+   readonly name: DesktopPackageTargetName
+-  readonly platform: 'darwin' | 'win32'
++  readonly platform: 'darwin' | 'win32' | 'linux'
+   readonly arch: 'arm64' | 'x64'
+-  readonly builderPlatform: '--mac' | '--win'
++  readonly builderPlatform: '--mac' | '--win' | '--linux'
+   readonly builderArch: '--arm64' | '--x64'
+ }
+ 
+@@ -80,6 +80,13 @@ const TARGETS: Record<DesktopPackageTargetName, DesktopPackageTarget> = {
+     builderPlatform: '--win',
+     builderArch: '--x64',
+   },
++  'linux-x64': {
++    name: 'linux-x64',
++    platform: 'linux',
++    arch: 'x64',
++    builderPlatform: '--linux',
++    builderArch: '--x64',
++  },
+ }
+ 
+ /**
+@@ -182,6 +189,9 @@ export function resolveDesktopPackageTarget(
+   if (target.platform === 'darwin' && hostPlatform !== 'darwin') {
+     throw new Error(`desktop package: ${name} requires a macOS build host`)
+   }
++  if (target.platform === 'linux' && (hostPlatform !== 'linux' || hostArch !== 'x64')) {
++    throw new Error('desktop package: linux-x64 requires a Linux x64 build host')
++  }
+   if (name === 'mac-arm64' && hostArch !== 'arm64') {
+     throw new Error('desktop package: mac-arm64 requires an Apple Silicon build host')
+   }
+@@ -467,10 +477,11 @@ export async function packageTarget(
+     '--pack-destination',
+     buildPaths.packedLandlock,
+   ], buildEnv, REPOSITORY_ROOT)
++  const deferRuntimeSmoke = signPrimaryRuntime || process.env.DSH_DESKTOP_DEFER_RUNTIME_SMOKE === '1'
+   await execute(['run', 'prepare:runtime', ...(signPrimaryRuntime ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
+   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
+   await execute(['run', 'prepare:packages'], targetEnv)
+-  await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
++  await execute(['run', 'prepare:dsh', ...(deferRuntimeSmoke ? ['--defer-runtime-smoke'] : [])], downloadEnv)
+   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime', '--dsh'], electronBuilderEnv)
+   if (invocation.prepareOnly) return
+   if (target.platform === 'darwin' && !invocation.directory) {
+diff --git a/apps/desktop/scripts/prepare-cli.ts b/apps/desktop/scripts/prepare-cli.ts
+index d2b9e14..ad60996 100644
+--- a/apps/desktop/scripts/prepare-cli.ts
++++ b/apps/desktop/scripts/prepare-cli.ts
+@@ -8,10 +8,10 @@ import { join } from 'node:path'
+  * @param destination - Physical runtime/cli directory prepared for the application.
+  * @param platform - Target Desktop operating system.
+  */
+-export function prepareDesktopCli(destination: string, platform: 'darwin' | 'win32'): void {
++export function prepareDesktopCli(destination: string, platform: 'darwin' | 'win32' | 'linux'): void {
+   const name = platform === 'win32' ? 'dsh.cmd' : 'dsh'
+   const command = join(destination, 'bin', name)
+   mkdirSync(join(destination, 'bin'), { recursive: true })
+   copyFileSync(join(import.meta.dirname, '..', 'cli', name), command)
+-  if (platform === 'darwin') chmodSync(command, 0o755)
++  if (platform !== 'win32') chmodSync(command, 0o755)
+ }
+diff --git a/apps/desktop/scripts/prepare-dsh.ts b/apps/desktop/scripts/prepare-dsh.ts
+index 442e017..c585d70 100644
+--- a/apps/desktop/scripts/prepare-dsh.ts
++++ b/apps/desktop/scripts/prepare-dsh.ts
+@@ -2,7 +2,7 @@
+ 
+ import { packagingStep } from './packaging-step.mjs'
+ import { spawn } from 'node:child_process'
+-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
++import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+ import { tmpdir } from 'node:os'
+ import { delimiter, join, relative, resolve } from 'node:path'
+ import { desktopNodeEnvironment } from '../src/node-environment.ts'
+@@ -41,7 +41,7 @@ const STORE_ROOT = join(BUILD_ROOT, 'store')
+ const RUNTIME_ROOT = BUILD_PATHS.runtime
+ const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
+ const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
+-const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
++const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : process.platform === 'linux' ? 'electron' : 'Electron.app/Contents/MacOS/Electron')
+ const PNPM = join(RUNTIME_ROOT, 'pnpm', 'bin', 'pnpm.mjs')
+ 
+ function manifestVersion(path: string, subject: string): string {
+@@ -141,6 +141,40 @@ async function main(): Promise<void> {
+         filter: source => desktopRuntimeFileExclusion(relative(modules, source), target, officeEngine) === undefined,
+       })
+     })
++    // Linux cannot load sharp's native binary under Electron (electron#46323): the first real image
++    // operation segfaults. runtime-file-policy.ts drops @img/sharp-linux-x64 for Linux, which makes
++    // sharp fall through to its WebAssembly branch; these packages are vendored because pnpm never
++    // resolves them for a linux-x64 install.
++    if (process.platform === 'linux') {
++      await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:materialize-linux-shims', async () => {
++        const vendor = join(APP_ROOT, 'vendor', 'sharp-wasm32')
++        if (!existsSync(vendor)) throw new Error(`desktop runtime: missing vendored ${vendor}`)
++        const outputModules = join(DSH_OUTPUT_ROOT, 'node_modules')
++        cpSync(join(vendor, '@img'), join(outputModules, '@img'), { recursive: true, dereference: true })
++        cpSync(join(vendor, '@emnapi'), join(outputModules, '@emnapi'), { recursive: true, dereference: true })
++        if (!existsSync(join(outputModules, 'tslib'))) {
++          cpSync(join(vendor, 'tslib'), join(outputModules, 'tslib'), { recursive: true, dereference: true })
++        }
++        // @deepseek-ai/libreoffice-kit ships native engines only for macOS and Windows; Linux is meant
++        // to fall back to its WebAssembly engine. That fallback is unreachable in a packaged app:
++        // Electron's asar shim makes fs.lstatSync() report a stat for ANY path inside app.asar, so
++        // installedPackageExists() claims the never-published @deepseek-ai/libreoffice-kit-linux-x64-glibc
++        // is installed and resolveEngine() throws "package is incomplete" instead of using wasm.
++        // Probe through the module resolver instead, which tells the truth inside an asar.
++        const officeIndex = join(outputModules, '@deepseek-ai', 'libreoffice-kit', 'lib', 'index.js')
++        const officeSource = readFileSync(officeIndex, 'utf8')
++        const officePatched = officeSource.replace(
++          /function installedPackageExists\(name\) \{\s*return \(require\.resolve\.paths\(name\) \?\? \[\]\)\.some\(\(directory\) => lstatSync\(join\(directory, name\), \{ throwIfNoEntry: false \}\) !== void 0\);\s*\}/u,
++          'function installedPackageExists(name) {\n'
++          + '\ttry { require.resolve(name + "/package.json"); return true } catch { return false }\n'
++          + '}',
++        )
++        if (officePatched === officeSource) {
++          throw new Error(`desktop runtime: LibreOffice engine probe patch did not apply to ${officeIndex}`)
++        }
++        writeFileSync(officeIndex, officePatched)
++      })
++    }
+     writeFileSync(join(DSH_OUTPUT_ROOT, 'package.json'), `${JSON.stringify({
+       name: '@deepseek-ai/dsh-desktop-runtime', private: true, version: release.version, type: 'module',
+       dependencies: Object.fromEntries(packageSet.packages.map(entry => [entry.name, entry.version])),
+@@ -162,11 +196,16 @@ async function main(): Promise<void> {
+     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:write-descriptor', async () => writeDesktopRuntime(DSH_OUTPUT_ROOT, release, packageSet.packages.map(entry => entry.name), target))
+     const descriptor = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-before-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
+     if (!process.argv.includes('--defer-runtime-smoke')) {
++      if (process.env.DSH_DESKTOP_DEBUG_IMG === '1') {
++        const imgDir = join(DSH_OUTPUT_ROOT, 'node_modules', '@img')
++        console.error('[debug-img] @img =', existsSync(imgDir) ? JSON.stringify(readdirSync(imgDir)) : 'MISSING')
++      }
+       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:smoke', () => smokePreparedRuntime(DSH_OUTPUT_ROOT, NODE, RUNTIME_ROOT, descriptor))
+       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-after-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
+     }
+   } catch (error) {
+-    rmSync(DSH_OUTPUT_ROOT, { recursive: true, force: true })
++    // Keep the failed tree for diagnosis when DSH_DESKTOP_KEEP_FAILED_TREE=1.
++    if (process.env.DSH_DESKTOP_KEEP_FAILED_TREE !== '1') rmSync(DSH_OUTPUT_ROOT, { recursive: true, force: true })
+     throw error
+   } finally {
+     let cleaned = false
+diff --git a/apps/desktop/scripts/prepare-runtime.ts b/apps/desktop/scripts/prepare-runtime.ts
+index 1b88f09..b986be3 100644
+--- a/apps/desktop/scripts/prepare-runtime.ts
++++ b/apps/desktop/scripts/prepare-runtime.ts
+@@ -31,7 +31,7 @@ function preparePnpm(): string {
+ async function main(): Promise<void> {
+   const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
+   const target = resolveDesktopBuildTarget()
+-  const platform = target.startsWith('mac-') ? 'darwin' : 'win32'
++  const platform = target.startsWith('mac-') ? 'darwin' : target.startsWith('linux-') ? 'linux' : 'win32'
+   const arch = target.endsWith('arm64') ? 'arm64' : 'x64'
+   const require = createRequire(import.meta.url)
+   const { version } = require('electron/package.json') as { version: string }
+@@ -39,7 +39,7 @@ async function main(): Promise<void> {
+     () => downloadArtifact({ version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads }))
+   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
+   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
+-  const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
++  const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : platform === 'linux' ? 'electron' : 'Electron.app/Contents/MacOS/Electron')
+   const nodeVersion = execFileSync(executable, ['-p', 'process.versions.node'], {
+     encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+   }).trim()
+diff --git a/apps/desktop/scripts/runtime-file-policy.ts b/apps/desktop/scripts/runtime-file-policy.ts
+index 1bc16b2..7b01043 100644
+--- a/apps/desktop/scripts/runtime-file-policy.ts
++++ b/apps/desktop/scripts/runtime-file-policy.ts
+@@ -40,5 +40,10 @@ export function desktopRuntimeFileExclusion(
+     if (file.endsWith('.pdb')) return 'node-pty debug symbols'
+   }
+   if (name === '@koromix/koffi-win32-x64' && entry === 'win32_x64/koffi.lib') return 'Koffi import library'
++  // Electron on Linux cannot load sharp's native binary: Electron's glib symbols leak into sharp's
++  // libvips and the first real image operation segfaults (electron#46323). Dropping the native package
++  // makes sharp's runtime platform switch throw, so it falls through to the WebAssembly build that
++  // prepare-dsh.ts copies in from apps/desktop/vendor/sharp-wasm32.
++  if (target.platform === 'linux' && name === '@img/sharp-linux-x64') return 'sharp native binary (WebAssembly build is used instead)'
+   return undefined
+ }
+diff --git a/apps/desktop/scripts/smoke-packaged-runtime.ts b/apps/desktop/scripts/smoke-packaged-runtime.ts
+index 106830b..6c47dfd 100644
+--- a/apps/desktop/scripts/smoke-packaged-runtime.ts
++++ b/apps/desktop/scripts/smoke-packaged-runtime.ts
+@@ -11,12 +11,16 @@ const paths = resolveDesktopTargetBuildPaths()
+ const { values } = parseArgs({ options: { unsigned: { type: 'boolean', default: false } }, allowPositionals: false })
+ const target = resolveDesktopBuildTarget()
+ const windows = target === 'win-x64'
++const linux = target === 'linux-x64'
+ if (values.unsigned && !windows) throw new Error('desktop smoke: unsigned artifacts require Windows')
+ const artifacts = values.unsigned ? paths.unsignedArtifacts : paths.artifacts
+ const application = windows ? join(artifacts, 'win-unpacked')
+-  : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app', 'Contents')
+-const resources = join(application, windows ? 'resources' : 'Resources')
+-const executable = windows ? join(application, 'DeepSeek Harness.exe') : join(application, 'MacOS', 'DeepSeek Harness')
++  : linux ? join(artifacts, 'linux-unpacked')
++    : join(artifacts, target === 'mac-arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app', 'Contents')
++const resources = join(application, windows ? 'resources' : linux ? 'resources' : 'Resources')
++const executable = windows ? join(application, 'DeepSeek Harness.exe')
++  : linux ? join(application, 'deepseek-harness')
++    : join(application, 'MacOS', 'DeepSeek Harness')
+ const descriptor = await verifyDesktopRuntime(paths.dsh, readDesktopRuntime(paths.dsh).release.version,
+   resolveDesktopPackageTarget(target))
+ if (windows && !values.unsigned) await verifyWindowsCode(application)
+diff --git a/apps/desktop/scripts/smoke-prepared-runtime.ts b/apps/desktop/scripts/smoke-prepared-runtime.ts
+index 697f527..6dbcc33 100644
+--- a/apps/desktop/scripts/smoke-prepared-runtime.ts
++++ b/apps/desktop/scripts/smoke-prepared-runtime.ts
+@@ -23,8 +23,13 @@ export async function smokePreparedRuntime(
+   root: string, node: string, resourcesRuntime: string, descriptor: DesktopRuntimeDescriptor,
+ ): Promise<void> {
+   const cache = await mkdtemp(join(tmpdir(), 'desktop-native-smoke-'))
+-  const environment = { ...scrubWindowsSigningEnvironment(process.env), NODE_OPTIONS: '',
++  const environment: NodeJS.ProcessEnv = { ...scrubWindowsSigningEnvironment(process.env), NODE_OPTIONS: '',
+     NARB_NATIVE_CACHE_DIR: cache, NARB_DISABLE_NATIVE_CACHE: '0' }
++  // The build host's TypeScript runner sets NODE_PATH to the repository's own node_modules.
++  // Inheriting it would add those to Module.globalPaths, so the payload smoke could resolve a
++  // native module (e.g. sharp) from the build host instead of from the prepared tree it is
++  // supposed to exercise. On Linux that silently picks the native sharp binary and segfaults.
++  delete environment.NODE_PATH
+   try {
+     const archive = runtimeArchivePath(root)
+     if (archive !== undefined) await verifyRuntimeArchive(archive, descriptor)
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index b9cf05a..f62fc66 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -31,6 +31,10 @@ peerDependencyRules:
+ allowBuilds:
+   esbuild: true
+   lefthook: true
++  # The Desktop shell runs on the Electron binary this script downloads. Linux is
++  # not a supported Desktop release target upstream, so a Linux host must fetch it
++  # here instead of relying on the packaging pipeline.
++  electron: true
+   # Cross-platform boundary for the persistent PTY backend, including ConPTY on Windows.
+   node-pty: true
+   # Pulled in by @earendil-works/pi-ai (optional LLM API backend). pnpm lists

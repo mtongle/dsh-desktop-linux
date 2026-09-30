@@ -1,0 +1,5 @@
+# Build artefacts / installed payloads — never commit these.
+linux-unpacked/
+*.bak-*/
+*.log
+node_modules/
