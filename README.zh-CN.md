@@ -26,7 +26,7 @@ Linux is not a supported Desktop release target
 - payload smoke → `{"node":"24.18.1","platform":"linux","arch":"x64","koffi":true,"sharp":true,"html":true,"pty":true,"pnpm":true,"grep":true,"glob":true}`
 - packaged smoke → `desktop runtime: DOCX, XLSX, PPTX to PDF and skill CLI discovery passed`
 - Electron `44.0.0`
-- `app.asar` 里 sharp：有 `@img/sharp-wasm32` + `@emnapi/runtime`，**没有 `@img/sharp-linux-x64`**
+- `scripts/verify-payload.sh` → `PASS`（有 `@img/sharp-wasm32` + `@emnapi/runtime`，无 `@img/sharp-linux-x64`）
 
 载荷目录：`apps/desktop/.desktop-build/targets/linux-x64/artifacts/linux-unpacked`
 （约 1.1 GB，单个 `deepseek-harness` 二进制）。
@@ -48,6 +48,21 @@ DSH_DESKTOP_PAYLOAD=~/build/deepseek-harness/apps/desktop/.desktop-build/targets
 
 Harness 数据在 `~/.dsh`（profile `desktop`），与 `dsh` CLI 共享。安装脚本**完全不碰它**，
 并且会把旧安装备份成 `~/.local/opt/deepseek-harness-desktop.bak-<时间戳>`。
+
+### 预编译产物（不想自己构建）
+
+[Releases](../../releases) 里挂着压缩后的产物，**作为独立资产**
+（`deepseek-harness-desktop-linux-x64-<时间戳>.tar.zst`，约 355 MB，附 `.sha256`）。
+只由手动触发 [`build-linux-desktop`](.github/workflows/build-linux-desktop.yml) 工作流产出，
+构建过程就是上面的流水线，并且以 `verify-payload.sh` 为门禁。
+
+```sh
+tar -I zstd -xf deepseek-harness-desktop-linux-x64-*.tar.zst
+DSH_DESKTOP_PAYLOAD="$PWD/linux-unpacked" bash install/install.sh
+```
+
+`.tar.zst` 里只有解包后的应用目录——没有安装器，没有 Arch 专属打包。
+不在本仓库假设的 `~/.local` 布局上的话，自己写个 `install.sh` 即可。
 
 ### 依赖
 
@@ -108,14 +123,16 @@ sharp 的原生二进制在 Linux + Electron 下**段错误**
 
 ```
 patches/0001-desktop-linux-port.patch   17 文件的 Linux 移植（对 639ed015 干净应用）
-scripts/bootstrap.sh                    克隆 + 打补丁 + vendor + .env.linux
+scripts/bootstrap.sh                    浅克隆 + 打补丁 + vendor + .env.linux
 scripts/build.sh                        上游自己的打包流水线
+scripts/verify-payload.sh               校验产物确实带上了 Linux 修复
 scripts/fetch-sharp-wasm-vendor.sh      vendor wasm sharp 包
 config/env.linux                        apps/desktop/.env.linux 模板
 install/install.sh                      ~/.local 安装器（免 sudo）
 install/deepseek-harness-desktop        启动器（带 GPU 失败兜底）
 install/deepseek-harness.desktop.in     桌面项模板
 docs/pitfalls.md                        13 条坑 + 定位方法（中文）
+.github/workflows/build-linux-desktop.yml   构建门禁 + 发布
 ```
 
 ## 启动器行为
@@ -135,7 +152,9 @@ FATAL:gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.
 
 - **只验证了一个版本、一个架构。** 仅对 `dsh-v0.2.0-rc.2` / `linux-x64` 验证过。上游会随意
   重构 `apps/desktop/scripts/`，换 commit 后 `git apply` 会拒绝——这正是预期的失败方式。
-- **没有 CI。** 一次构建约 15 分钟 + 1.1 GB 产物，还没接 Actions。
+- **CI 是门禁，不是定时任务。** 改动 `patches/`、`scripts/`、`config/`、`install/` 的 push 会跑完整
+  构建 + `verify-payload.sh`（约 20 分钟，不产 artifact）。**发布只由手动 `workflow_dispatch` 触发**，
+  不会背着你发东西。一次完整构建约 15 分钟，产物 1.1 GB（压缩后 355 MB）。
 - **不是 DeepSeek 官方支持。** 上游是**刻意**把 Linux 排除在桌面发布矩阵外的；
   对 `download.deepseek.com/dsh-desk/feeds/linux-x64/` 的自动更新请当作不确定。
 - 桌面外壳本身是官方的，本仓库不添加任何产品代码。

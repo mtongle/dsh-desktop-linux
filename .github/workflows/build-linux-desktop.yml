@@ -1,0 +1,135 @@
+name: build-linux-desktop
+
+# Builds the Linux (x64) desktop payload with upstream's own packaging pipeline,
+# runs the structural payload check, and — on manual dispatch — publishes the
+# compressed payload as a release asset (the binary, on its own).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (empty = linux-x64-<YYYYMMDD-HHMM>)"
+        required: false
+        default: ""
+      draft:
+        description: "Create the release as a draft"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "patches/**"
+      - "scripts/**"
+      - "config/**"
+      - "install/**"
+      - ".github/workflows/build-linux-desktop.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-linux-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # The build tree is ~2.3 GB of source + several GB of node_modules on top of
+      # the ~1.1 GB payload, and the hosted runner only leaves ~14 GB free.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -a -f >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Install pnpm
+        run: |
+          npm i -g pnpm@11.7.0
+          pnpm --version
+          node --version
+
+      - name: Bootstrap upstream + apply the Linux port
+        run: ./scripts/bootstrap.sh "$HOME/build/deepseek-harness"
+
+      - name: Build with upstream's packaging pipeline
+        run: ./scripts/build.sh "$HOME/build/deepseek-harness"
+
+      - name: Verify the payload
+        run: ./scripts/verify-payload.sh
+
+      - name: Compress the payload
+        id: pack
+        run: |
+          set -euo pipefail
+          PAYLOAD="$HOME/build/deepseek-harness/apps/desktop/.desktop-build/targets/linux-x64/artifacts/linux-unpacked"
+          STAMP="$(date -u +%Y%m%d-%H%M)"
+          NAME="deepseek-harness-desktop-linux-x64-${STAMP}"
+          if command -v zstd >/dev/null; then
+            tar -I 'zstd -3 -T0' -cf "${NAME}.tar.zst" -C "$(dirname "$PAYLOAD")" "$(basename "$PAYLOAD")"
+            FILE="${NAME}.tar.zst"
+          else
+            tar -I 'gzip -6' -cf "${NAME}.tar.gz" -C "$(dirname "$PAYLOAD")" "$(basename "$PAYLOAD")"
+            FILE="${NAME}.tar.gz"
+          fi
+          sha256sum "$FILE" > "${FILE}.sha256"
+          ls -lh "$FILE" "${FILE}.sha256"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "tag=${STAMP}" >> "$GITHUB_OUTPUT"
+
+      # Only on dispatch: a 355 MB artifact per push would blow the 500 MB free
+      # tier quota for no benefit. Push runs are a gate; they need no artifact.
+      - name: Upload artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.file }}
+          path: |
+            ${{ steps.pack.outputs.file }}
+            ${{ steps.pack.outputs.file }}.sha256
+          retention-days: 7
+          compression-level: 0
+
+      - name: Publish release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_INPUT: ${{ inputs.tag }}
+          DRAFT: ${{ inputs.draft }}
+          STAMP: ${{ steps.pack.outputs.tag }}
+          FILE: ${{ steps.pack.outputs.file }}
+        run: |
+          set -euo pipefail
+          TAG="${TAG_INPUT:-linux-x64-${STAMP}}"
+          ARGS=()
+          [ "$DRAFT" = "true" ] && ARGS+=(--draft)
+          gh release create "$TAG" \
+            "${ARGS[@]}" \
+            --target "$GITHUB_SHA" \
+            --title "Linux x64 desktop build ${TAG}" \
+            --notes "$(cat <<EOF
+          DeepSeek Harness Desktop, linux-x64, built by upstream's own packaging
+          pipeline (\`pnpm run package:desktop:dir\`) with the Linux port applied.
+
+          - upstream: \`dsh-v0.2.0-rc.2\` (\`639ed015\`)
+          - built from: \`${GITHUB_SHA:0:8}\` on $(date -u +%Y-%m-%dT%H:%MZ)
+          - \`verify-payload.sh\`: PASS (\`@img/sharp-wasm32\` present, no \`@img/sharp-linux-x64\`)
+
+          \`\`\`
+          tar -I zstd -xf ${FILE}
+          DSH_DESKTOP_PAYLOAD=\$PWD/linux-unpacked bash install/install.sh
+          \`\`\`
+
+          Not a DeepSeek release. See the README for caveats.
+          EOF
+          )" \
+            "${FILE}#${FILE}" \
+            "${FILE}.sha256#${FILE}.sha256"

@@ -29,7 +29,7 @@ Verified against tag **`dsh-v0.2.0-rc.2`** (commit `639ed015`), 2026-09-30.
 | payload smoke | `{"node":"24.18.1","platform":"linux","arch":"x64","koffi":true,"sharp":true,"html":true,"pty":true,"pnpm":true,"grep":true,"glob":true}` |
 | packaged smoke | `desktop runtime: DOCX, XLSX, PPTX to PDF and skill CLI discovery passed` |
 | Electron | `44.0.0` |
-| `app.asar` sharp | `@img/sharp-wasm32` + `@emnapi/runtime` present, **no `@img/sharp-linux-x64`** |
+| `scripts/verify-payload.sh` | `PASS` — `@img/sharp-wasm32` + `@emnapi/runtime` present, `@img/sharp-linux-x64` absent |
 
 Payload: `apps/desktop/.desktop-build/targets/linux-x64/artifacts/linux-unpacked`
 (~1.1 GB, single `deepseek-harness` binary).
@@ -52,6 +52,22 @@ Then launch `deepseek-harness-desktop`, or pick **DeepSeek Harness** from your a
 Harness state lives in `~/.dsh` (`profiles/desktop`), shared with the `dsh` CLI.
 The installer never touches it, and backs up any previous install to
 `~/.local/opt/deepseek-harness-desktop.bak-<timestamp>`.
+
+### Prebuilt payload (no local build)
+
+[Releases](../../releases) carry the compressed payload as a standalone asset
+(`deepseek-harness-desktop-linux-x64-<stamp>.tar.zst`, ~355 MB, plus a `.sha256`).
+It is only produced by a manual run of the [`build-linux-desktop`](.github/workflows/build-linux-desktop.yml)
+workflow, which builds with the pipeline above and gates on `verify-payload.sh`.
+
+```sh
+tar -I zstd -xf deepseek-harness-desktop-linux-x64-*.tar.zst
+DSH_DESKTOP_PAYLOAD="$PWD/linux-unpacked" bash install/install.sh
+```
+
+The `.tar.zst` contains nothing but the unpacked application directory — no installer,
+no Arch-specific packaging. Bring your own `install.sh` if you are not on the `~/.local`
+layout this repo assumes.
 
 ### Requirements
 
@@ -119,12 +135,14 @@ the truth inside an asar. DOCX/XLSX/PPTX → PDF then works via wasm.
 patches/0001-desktop-linux-port.patch   the 17-file Linux port (applies to 639ed015)
 scripts/bootstrap.sh                    clone + patch + vendor + .env.linux
 scripts/build.sh                        upstream's own packaging pipeline
+scripts/verify-payload.sh               assert the payload carries the Linux fixes
 scripts/fetch-sharp-wasm-vendor.sh      vendor the wasm sharp packages
 config/env.linux                        apps/desktop/.env.linux template
 install/install.sh                      ~/.local installer (no sudo)
 install/deepseek-harness-desktop        launcher (GPU-failure fallback)
 install/deepseek-harness.desktop.in     desktop entry template
 docs/pitfalls.md                        the 13 traps, with diagnosis notes
+.github/workflows/build-linux-desktop.yml   build gate + release publisher
 ```
 
 ## Launcher behaviour
@@ -146,8 +164,10 @@ software rendering.
 - **One release, one architecture.** Verified only against `dsh-v0.2.0-rc.2` /
   `linux-x64`. Upstream refactors `apps/desktop/scripts/` freely; `git apply` will
   reject the patch on other commits, which is the intended failure mode.
-- **No CI.** The build needs ~15 min and a 1.1 GB payload; it has not been wired to
-  Actions.
+- **CI is a gate, not a nightly.** Pushes touching `patches/`, `scripts/`, `config/` or
+  `install/` run the full build plus `verify-payload.sh` (~20 min, no artifact). Releases
+  are only cut by a manual `workflow_dispatch`, so nothing is published behind your back.
+  A full rebuild needs ~15 min and produces a 1.1 GB payload (355 MB compressed).
 - **Not endorsed by DeepSeek.** Upstream deliberately excludes Linux from the desktop
   release matrix; treat auto-update against `download.deepseek.com/dsh-desk/feeds/linux-x64/`
   as speculative.
