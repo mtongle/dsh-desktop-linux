@@ -71,10 +71,13 @@ DSH_DESKTOP_PAYLOAD="$PWD/linux-unpacked" bash install/install.sh
   （Arch 的 `nodejs` 没有 corepack：`npm i -g --prefix ~/.local/share/pnpm-self pnpm@11.7.0`）
 - 构建树约需 10 GB 空闲磁盘
 
-## 三处修复
+## 补丁
 
-少任何一处，要么流水线挂，要么应用崩。三处都是只会在 Linux 上现形的上游真 bug。
-定位过程见 [docs/pitfalls.md](docs/pitfalls.md)（中文，13 条）。
+前三个是**必需**的——少任何一个，要么流水线挂，要么应用崩。第四个是外观性的。
+四个都是只会在 Linux 上现形的上游真行为，定位过程见 [docs/pitfalls.md](docs/pitfalls.md)（中文）。
+
+`bootstrap.sh` 会按文件名顺序应用 `patches/*.patch`，且各补丁互不重叠（没有两个改同一个文件），
+所以**把某个补丁从 `patches/` 里删掉就是"跳过它"的正式方式**。
 
 ### 1. Linux 发布目标（17 文件，`patches/0001-desktop-linux-port.patch`）
 
@@ -119,10 +122,26 @@ sharp 的原生二进制在 Linux + Electron 下**段错误**
 `prepare-dsh.ts` 把这个探测改写成用模块解析器，它在 asar 里说的是实话。
 之后 DOCX/XLSX/PPTX → PDF 就能走 wasm 正常工作了。
 
+### 4. 去掉应用内菜单栏（外观性，`patches/0002-hide-application-menu-bar.patch`）
+
+不构建也能用。上游在**所有非 Windows 平台**都会用可见模板调 `Menu.setApplicationMenu(...)`，
+于是 Linux 窗口里多出一条 `应用 / Edit`。
+
+而 **Electron 在 Linux 上不理会顶层菜单项的 `visible: false`** —— 所以光把 Linux 也塞进上游那个
+"隐形"的 Windows 模板，会渲染出两条 `Toggle Developer Tools`；只有**真正空的菜单**才能去掉这条：
+
+```ts
+Menu.setApplicationMenu(process.platform === 'linux' ? null : Menu.buildFromTemplate(…))
+```
+
+默认应用。想保留菜单栏，就在 bootstrap 前删掉 `patches/0002-*.patch`。
+代价：没有 F12 开发者工具快捷键，也没有检查更新 / CLI 命令 / 退出这几个菜单项。
+
 ## 目录
 
 ```
 patches/0001-desktop-linux-port.patch   17 文件的 Linux 移植（对 639ed015 干净应用）
+patches/0002-hide-application-menu-bar.patch   去掉窗口内的 应用/Edit 菜单栏（外观性）
 scripts/bootstrap.sh                    浅克隆 + 打补丁 + vendor + .env.linux
 scripts/build.sh                        上游自己的打包流水线
 scripts/verify-payload.sh               校验产物确实带上了 Linux 修复
@@ -131,7 +150,7 @@ config/env.linux                        apps/desktop/.env.linux 模板
 install/install.sh                      ~/.local 安装器（免 sudo）
 install/deepseek-harness-desktop        启动器（带 GPU 失败兜底）
 install/deepseek-harness.desktop.in     桌面项模板
-docs/pitfalls.md                        13 条坑 + 定位方法（中文）
+docs/pitfalls.md                        14 条坑 + 定位方法（中文）
 .github/workflows/build-linux-desktop.yml   构建门禁 + 发布
 ```
 

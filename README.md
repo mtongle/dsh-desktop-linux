@@ -76,11 +76,14 @@ layout this repo assumes.
   (Arch's `nodejs` has no corepack: `npm i -g --prefix ~/.local/share/pnpm-self pnpm@11.7.0`)
 - ~10 GB free disk for the build tree
 
-## The three fixes
+## The patches
 
-Without all three the pipeline fails or the app crashes. Each one is a real upstream
-bug that only manifests on Linux; details and diagnosis notes in
-[docs/pitfalls.md](docs/pitfalls.md).
+Three of them are required — without them the pipeline fails or the app crashes. The fourth is
+cosmetic. All four are real upstream behaviours that only surface on Linux; details and diagnosis
+notes in [docs/pitfalls.md](docs/pitfalls.md).
+
+`bootstrap.sh` applies every `patches/*.patch` in filename order, and the patches are independent
+(no two touch the same file), so deleting a file from `patches/` is a supported way to skip it.
 
 ### 1. Linux release target (17 files, `patches/0001-desktop-linux-port.patch`)
 
@@ -129,10 +132,27 @@ and `resolveEngine()` threw `Installed LibreOfficeKit package is incomplete` ins
 using wasm. `prepare-dsh.ts` rewrites the probe to use the module resolver, which tells
 the truth inside an asar. DOCX/XLSX/PPTX → PDF then works via wasm.
 
+### 4. No application menu bar (cosmetic, `patches/0002-hide-application-menu-bar.patch`)
+
+Not needed to build. Upstream calls `Menu.setApplicationMenu(...)` with a visible template on
+every non-Windows platform, so Linux gets an `应用 / Edit` strip inside the window.
+
+Electron **ignores `visible: false` on top-level menu items**, so simply routing Linux into
+upstream's "invisible" Windows template renders two literal `Toggle Developer Tools` entries —
+only a genuinely empty menu removes the bar:
+
+```ts
+Menu.setApplicationMenu(process.platform === 'linux' ? null : Menu.buildFromTemplate(…))
+```
+
+Applied by default. To keep the menu bar, delete `patches/0002-*.patch` before bootstrapping.
+Cost: no F12 devtools accelerator, and no menu entries for check-updates / CLI command / quit.
+
 ## Layout
 
 ```
 patches/0001-desktop-linux-port.patch   the 17-file Linux port (applies to 639ed015)
+patches/0002-hide-application-menu-bar.patch   no 应用/Edit strip inside the window (cosmetic)
 scripts/bootstrap.sh                    clone + patch + vendor + .env.linux
 scripts/build.sh                        upstream's own packaging pipeline
 scripts/verify-payload.sh               assert the payload carries the Linux fixes
@@ -141,7 +161,7 @@ config/env.linux                        apps/desktop/.env.linux template
 install/install.sh                      ~/.local installer (no sudo)
 install/deepseek-harness-desktop        launcher (GPU-failure fallback)
 install/deepseek-harness.desktop.in     desktop entry template
-docs/pitfalls.md                        the 13 traps, with diagnosis notes
+docs/pitfalls.md                        the 14 traps, with diagnosis notes
 .github/workflows/build-linux-desktop.yml   build gate + release publisher
 ```
 

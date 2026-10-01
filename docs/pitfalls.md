@@ -1,4 +1,4 @@
-# 踩坑记录（13 条）
+# 踩坑记录（14 条）
 
 每一条都是实测撞出来的，附带定位方法。按"会不会让你卡住"排序，不按发现顺序。
 
@@ -164,6 +164,30 @@ Electron 在 Wayland 下会选 XWayland，在 niri 上工作正常。
 
 树的 `node_modules` 是指向 store（以及其他活跃 pnpm 项目）的**硬链接**，
 所以 `du -sh` 会高估 `rm -rf` 真正释放的空间。
+
+---
+
+## 14. Linux 窗口里多出一条 `应用 / Edit` 菜单栏
+
+`apps/desktop/src/main.ts` 的 `refreshApplicationMenu()` 对**所有非 win32 平台**（即 macOS + Linux）
+都挂一条可见菜单栏。Windows 拿到的是一个只含 `visible: false` 项的模板，所以什么都不显示。
+
+**坑**：Electron 在 Linux 上**不理会顶层菜单项的 `visible: false`**。所以"把 Linux 也切到 Windows
+那个分支"并不会得到一条空菜单栏 —— 它会渲染出两条字面的 `Toggle Developer Tools`。只有传 `null`
+才是真正去掉：
+
+```ts
+Menu.setApplicationMenu(process.platform === 'linux' ? null : Menu.buildFromTemplate(…))
+```
+
+**别改错对象**：`preload-menu.ts` 里的 HTML 菜单栏（`installWindowsMenu`）是另一回事，只在 Windows
+挂载（见 `preload-windows.ts`）。
+
+**应急、不想重编译的做法**：对已安装的 `app.asar` 做**等长字节补丁**（`===` → `!==`，再把
+`devToolsItems` 数组内部填空格变 `[]`）。asar 把每个文件的偏移记在头部，**改长度会让后面所有文件
+错位**，所以只能等长替换，绝不重打包 —— 顺便也就避开了 `app.asar.unpacked` 那一摊。
+
+代价：F12 开发者工具快捷键、以及检查更新 / CLI 命令 / 退出菜单项没了。窗口关闭按钮照常。
 
 ---
 

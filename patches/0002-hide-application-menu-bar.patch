@@ -1,0 +1,17 @@
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index b4b8153..4d3400c 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -974,7 +974,11 @@ async function main(): Promise<void> {
+     { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
+   ]
+   const refreshApplicationMenu = (): void => {
+-    Menu.setApplicationMenu(Menu.buildFromTemplate(process.platform === 'win32' ? devToolsItems : [{
++    // Linux gets no application menu at all. Electron renders one as an extra strip inside the
++    // window, and it does not honour `visible: false` on top-level items, so the Windows template
++    // (which is invisible by construction) is not a usable substitute — only a null menu removes
++    // the bar. See docs/pitfalls.md.
++    Menu.setApplicationMenu(process.platform === 'linux' ? null : Menu.buildFromTemplate(process.platform === 'win32' ? devToolsItems : [{
+       label: darwin ? app.name : currentDesktopLocale().messages.application,
+       submenu: [...applicationItems(), ...devToolsItems],
+     }, ...platformMenus()]))
